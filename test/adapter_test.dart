@@ -65,16 +65,15 @@ void main() {
     test('GeminiVisionAdapter handles successful API response', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.toString(), contains('generativelanguage.googleapis.com'));
-        expect(request.url.queryParameters['key'], 'test_gemini_key');
+        expect(request.headers['x-goog-api-key'], 'test_gemini_key');
 
         final fakeGeminiResponse = {
-          'candidates': [
+          'steps': [
             {
-              'content': {
-                'parts': [
-                  {'text': 'Gemini Identified: Vintage Wristwatch'},
-                ],
-              },
+              'type': 'model_output',
+              'content': [
+                {'type': 'text', 'text': 'Gemini Identified: Vintage Wristwatch'},
+              ],
             },
           ],
         };
