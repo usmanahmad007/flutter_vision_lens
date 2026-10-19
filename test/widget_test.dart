@@ -62,6 +62,7 @@ void main() {
             body: VisionLensOverlay(
               controller: controller,
               adapter: const MockVisionAdapter(simulatedDelay: Duration.zero),
+              autoCropImage: false,
               child: const SizedBox.expand(),
             ),
           ),
@@ -80,6 +81,7 @@ void main() {
 
       // Tap Explain prompt chip
       await tester.tap(find.text('Explain'));
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(controller.analysisResult, contains('Visual Intelligence Insights'));

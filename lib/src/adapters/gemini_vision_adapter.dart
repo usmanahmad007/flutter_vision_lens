@@ -37,10 +37,17 @@ class GeminiVisionAdapter implements VisionAiAdapter {
 
     // Add inline image payload if byte data was captured
     if (region.imageBytes != null && region.imageBytes!.isNotEmpty) {
-      final base64Image = base64Encode(region.imageBytes!);
+      final bytes = region.imageBytes!;
+      final isPng = bytes.length > 4 &&
+          bytes[0] == 0x89 &&
+          bytes[1] == 0x50 &&
+          bytes[2] == 0x4E &&
+          bytes[3] == 0x47;
+      final mimeType = isPng ? 'image/png' : 'image/jpeg';
+      final base64Image = base64Encode(bytes);
       parts.add({
         'inline_data': {
-          'mime_type': 'image/jpeg',
+          'mime_type': mimeType,
           'data': base64Image,
         },
       });

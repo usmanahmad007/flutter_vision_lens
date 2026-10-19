@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../adapters/vision_ai_adapter.dart';
 import '../controllers/vision_lens_controller.dart';
 import '../models/vision_lens_mode.dart';
@@ -37,6 +40,9 @@ class VisionLensOverlay extends StatefulWidget {
   /// Alignment of the floating result sheet.
   final Alignment resultSheetAlignment;
 
+  /// Whether to automatically capture and crop image bytes from the child widget using RepaintBoundary.
+  final bool autoCropImage;
+
   /// Creates a [VisionLensOverlay].
   const VisionLensOverlay({
     super.key,
@@ -48,6 +54,7 @@ class VisionLensOverlay extends StatefulWidget {
     this.showResultSheet = true,
     this.toolbarAlignment = Alignment.topCenter,
     this.resultSheetAlignment = Alignment.bottomCenter,
+    this.autoCropImage = true,
   });
 
   @override
@@ -62,6 +69,41 @@ class _VisionLensOverlayState extends State<VisionLensOverlay>
   Offset? _tapPosition;
   Offset? _panStart;
   final List<Offset> _currentLassoPoints = [];
+  final GlobalKey _boundaryKey = GlobalKey();
+
+  Future<Uint8List?> _captureCroppedRegion(VisionRegion region) async {
+    if (!widget.autoCropImage) return null;
+    try {
+      final boundary = _boundaryKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null || boundary.debugNeedsPaint) return null;
+
+      final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+      final fullImage = await boundary.toImage(pixelRatio: pixelRatio);
+
+      final screenRect = region.screenRect;
+      final srcRect = Rect.fromLTWH(
+        (screenRect.left * pixelRatio).clamp(0.0, fullImage.width.toDouble()),
+        (screenRect.top * pixelRatio).clamp(0.0, fullImage.height.toDouble()),
+        (screenRect.width * pixelRatio).clamp(1.0, fullImage.width.toDouble()),
+        (screenRect.height * pixelRatio).clamp(1.0, fullImage.height.toDouble()),
+      );
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final dstRect = Rect.fromLTWH(0, 0, srcRect.width, srcRect.height);
+      canvas.drawImageRect(fullImage, srcRect, dstRect, Paint());
+      final picture = recorder.endRecording();
+      final croppedImage = await picture.toImage(
+        srcRect.width.toInt(),
+        srcRect.height.toInt(),
+      );
+      final byteData = await croppedImage.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void initState() {
@@ -111,12 +153,20 @@ class _VisionLensOverlayState extends State<VisionLensOverlay>
     widget.controller.startAnalyzing();
 
     try {
+      var effectiveRegion = region;
+      if (effectiveRegion.imageBytes == null || effectiveRegion.imageBytes!.isEmpty) {
+        final capturedBytes = await _captureCroppedRegion(region);
+        if (capturedBytes != null) {
+          effectiveRegion = region.copyWith(imageBytes: capturedBytes);
+        }
+      }
+
       String responseText;
       if (widget.onAnalyze != null) {
-        responseText = await widget.onAnalyze!(region, prompt);
+        responseText = await widget.onAnalyze!(effectiveRegion, prompt);
       } else if (widget.adapter != null) {
         responseText = await widget.adapter!.analyze(
-          region: region,
+          region: effectiveRegion,
           prompt: prompt,
         );
       } else {
@@ -232,8 +282,11 @@ class _VisionLensOverlayState extends State<VisionLensOverlay>
         return Stack(
           fit: StackFit.expand,
           children: [
-            // 1. Underlaid Child Content
-            widget.child,
+            // 1. Underlaid Child Content with RepaintBoundary for auto-cropping
+            RepaintBoundary(
+              key: _boundaryKey,
+              child: widget.child,
+            ),
 
             // 2. Gesture Detector Layer
             GestureDetector(
