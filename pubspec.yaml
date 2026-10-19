@@ -1,0 +1,28 @@
+name: flutter_vision_lens
+description: An interactive Apple Visual Intelligence and Google Lens style multimodal camera and image overlay for Flutter with tap-to-inspect, freehand lasso, glowing shaders, and AI connectors.
+version: 0.1.0
+repository: https://github.com/usmanahmad007/flutter_vision_lens
+issue_tracker: https://github.com/usmanahmad007/flutter_vision_lens/issues
+homepage: https://github.com/usmanahmad007/flutter_vision_lens
+topics:
+  - vision
+  - camera
+  - ai
+  - multimodal
+  - developer-tools
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.10.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
