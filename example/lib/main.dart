@@ -1,5 +1,7 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_vision_lens/flutter_vision_lens.dart';
+import 'package:image_picker/image_picker.dart';
 
 void main() {
   runApp(const VisionLensDemoApp());
@@ -35,6 +37,7 @@ class VisionLensDemoScreen extends StatefulWidget {
 class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
   late final VisionLensController _controller;
   late VisionAiAdapter _adapter;
+  Uint8List? _customImageBytes;
 
   @override
   void initState() {
@@ -82,14 +85,44 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
     });
   }
 
+  Future<void> _pickCustomImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked != null) {
+      final bytes = await picked.readAsBytes();
+      setState(() {
+        _customImageBytes = bytes;
+        _controller.clearSelection();
+      });
+    }
+  }
+
+  void _clearCustomImage() {
+    setState(() {
+      _customImageBytes = null;
+      _controller.clearSelection();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Flutter Vision Lens 🔍'),
+        title: Text(_customImageBytes != null ? 'Testing On Your Picture 📷' : 'Flutter Vision Lens 🔍'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          if (_customImageBytes != null)
+            IconButton(
+              tooltip: 'Reset to Sample View',
+              icon: const Icon(Icons.refresh_rounded),
+              onPressed: _clearCustomImage,
+            ),
+          IconButton(
+            tooltip: 'Upload / Pick Picture',
+            icon: const Icon(Icons.add_photo_alternate_rounded, color: Colors.cyanAccent),
+            onPressed: _pickCustomImage,
+          ),
           PopupMenuButton<String>(
             tooltip: 'Choose Visual Theme',
             icon: const Icon(Icons.palette_outlined),
@@ -122,7 +155,16 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
       body: VisionLensOverlay(
         controller: _controller,
         adapter: _adapter,
-        child: _buildCameraSimulationView(),
+        child: _customImageBytes != null
+            ? Container(
+                color: Colors.black,
+                alignment: Alignment.center,
+                child: Image.memory(
+                  _customImageBytes!,
+                  fit: BoxFit.contain,
+                ),
+              )
+            : _buildCameraSimulationView(),
       ),
     );
   }
@@ -137,37 +179,53 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
         ),
       ),
       child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(
                 Icons.center_focus_weak_rounded,
-                size: 64.0,
-                color: Colors.white24,
+                size: 56.0,
+                color: Colors.cyanAccent,
               ),
-              const SizedBox(height: 16.0),
+              const SizedBox(height: 12.0),
               const Text(
-                'Point Camera or Tap Objects Below',
+                'Interactive Visual Intelligence',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 18.0,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8.0),
+              const SizedBox(height: 6.0),
               const Text(
-                'Try Tap-to-Inspect, Freehand Lasso, or Bounding Box.\n'
-                'Detected candidate brackets are highlighted automatically.',
+                'Tap, lasso, or box-select any area below, or upload your own picture!',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white60,
-                  fontSize: 13.0,
+                  fontSize: 12.5,
                   height: 1.4,
                 ),
               ),
-              const SizedBox(height: 32.0),
+              const SizedBox(height: 18.0),
+
+              // Upload Button
+              ElevatedButton.icon(
+                onPressed: _pickCustomImage,
+                icon: const Icon(Icons.upload_file_rounded, size: 18.0),
+                label: const Text('Upload Your Own Picture'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.cyanAccent.withAlpha(40),
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent),
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+                ),
+              ),
+
+              const SizedBox(height: 24.0),
+
               _buildSimulationCard(
                 icon: Icons.watch_rounded,
                 title: 'Smart Watch Display',
