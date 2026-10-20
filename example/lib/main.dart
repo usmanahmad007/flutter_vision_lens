@@ -1,9 +1,11 @@
 import 'dart:typed_data';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_vision_lens/flutter_vision_lens.dart';
 import 'package:image_picker/image_picker.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const VisionLensDemoApp());
 }
 
@@ -25,7 +27,8 @@ class VisionLensDemoApp extends StatelessWidget {
   }
 }
 
-/// Interactive screen with camera simulation and multimodal vision overlay.
+/// Interactive screen supporting live real camera feed, picture upload,
+/// and simulated vision objects.
 class VisionLensDemoScreen extends StatefulWidget {
   /// Creates the [VisionLensDemoScreen].
   const VisionLensDemoScreen({super.key});
@@ -34,14 +37,31 @@ class VisionLensDemoScreen extends StatefulWidget {
   State<VisionLensDemoScreen> createState() => _VisionLensDemoScreenState();
 }
 
-class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
+class _VisionLensDemoScreenState extends State<VisionLensDemoScreen>
+    with WidgetsBindingObserver {
   late final VisionLensController _controller;
   late VisionAiAdapter _adapter;
+
+  // Real Camera state
+  List<CameraDescription> _cameras = [];
+  CameraController? _cameraController;
+  bool _isCameraInitialized = false;
+  int _selectedCameraIndex = 0;
+  bool _isFlashOn = false;
+  bool _useLiveCamera = true;
+  String? _cameraErrorMessage;
+
+  // Uploaded picture state
   Uint8List? _customImageBytes;
+
+  // In-app API Key (persists in state only, never committed to git)
+  String? _geminiApiKey;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _controller = VisionLensController(
       style: VisionLensStyle.appleIntelligence(),
       initialObjects: const [
@@ -59,28 +79,100 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
           normalizedRect: Rect.fromLTWH(0.55, 0.32, 0.35, 0.16),
           highlightColor: Color(0xFFFF4081),
         ),
-        VisionObject(
-          id: '3',
-          label: 'Receipt Code',
-          confidence: 0.91,
-          normalizedRect: Rect.fromLTWH(0.25, 0.58, 0.50, 0.18),
-          highlightColor: Color(0xFFFFD700),
-        ),
       ],
     );
 
-    // Default to offline MockVisionAdapter so developers can run and test
-    // immediately without needing an API key!
-    //
-    // To connect to real Google Gemini Multimodal AI, replace with your API key:
-    // _adapter = const GeminiVisionAdapter(
-    //   apiKey: 'YOUR_GEMINI_API_KEY', // Get from https://aistudio.google.com/
-    // );
+    // Default to offline MockVisionAdapter so developers can run immediately.
     _adapter = const MockVisionAdapter();
+
+    // Initialize the real hardware camera
+    _initCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final CameraController? cameraController = _cameraController;
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      cameraController.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _setupCameraController(cameraController.description);
+    }
+  }
+
+  Future<void> _initCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isNotEmpty) {
+        _cameras = cameras;
+        await _setupCameraController(cameras[0]);
+      } else {
+        setState(() {
+          _useLiveCamera = false;
+          _cameraErrorMessage = 'No physical cameras detected on this device.';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _useLiveCamera = false;
+        _cameraErrorMessage = 'Camera permission or initialization error: $e';
+      });
+    }
+  }
+
+  Future<void> _setupCameraController(CameraDescription description) async {
+    await _cameraController?.dispose();
+
+    final controller = CameraController(
+      description,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
+    try {
+      await controller.initialize();
+      if (mounted) {
+        setState(() {
+          _cameraController = controller;
+          _isCameraInitialized = true;
+          _cameraErrorMessage = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = false;
+          _cameraErrorMessage = 'Failed to initialize camera: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2) return;
+    _selectedCameraIndex = (_selectedCameraIndex + 1) % _cameras.length;
+    setState(() => _isCameraInitialized = false);
+    await _setupCameraController(_cameras[_selectedCameraIndex]);
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+    _isFlashOn = !_isFlashOn;
+    await _cameraController!.setFlashMode(
+      _isFlashOn ? FlashMode.torch : FlashMode.off,
+    );
+    setState(() {});
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cameraController?.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -98,6 +190,7 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
       final bytes = await picked.readAsBytes();
       setState(() {
         _customImageBytes = bytes;
+        _useLiveCamera = false;
         _controller.clearSelection();
       });
     }
@@ -106,29 +199,170 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
   void _clearCustomImage() {
     setState(() {
       _customImageBytes = null;
+      _useLiveCamera = true;
       _controller.clearSelection();
     });
+  }
+
+  void _showApiKeyDialog() {
+    final textController = TextEditingController(text: _geminiApiKey ?? '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E28),
+        title: const Row(
+          children: [
+            Icon(Icons.key_rounded, color: Colors.amberAccent),
+            SizedBox(width: 8),
+            Text(
+              'Gemini API Key',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Paste your Gemini API key to activate live multimodal AI recognition on camera:',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: textController,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Enter your Gemini API key...',
+                hintStyle: const TextStyle(color: Colors.white38),
+                filled: true,
+                fillColor: Colors.black26,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _geminiApiKey = null;
+                _adapter = const MockVisionAdapter();
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Switched to Mock Vision AI')),
+              );
+            },
+            child: const Text('Use Mock AI', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
+            onPressed: () {
+              final key = textController.text.trim();
+              if (key.isNotEmpty) {
+                setState(() {
+                  _geminiApiKey = key;
+                  _adapter = GeminiVisionAdapter(apiKey: key);
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('⚡ Gemini Multimodal AI Activated!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+              Navigator.pop(context);
+            },
+            child: const Text(
+              'Save & Activate',
+              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_customImageBytes != null ? 'Testing On Your Picture 📷' : 'Flutter Vision Lens 🔍'),
+        title: Text(
+          _useLiveCamera
+              ? 'Live Camera Lens 📷'
+              : (_customImageBytes != null
+                  ? 'Testing On Your Picture 🖼️'
+                  : 'Interactive Simulation ✨'),
+          style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          // Clear custom image and return to camera
           if (_customImageBytes != null)
             IconButton(
-              tooltip: 'Reset to Sample View',
-              icon: const Icon(Icons.refresh_rounded),
+              tooltip: 'Clear Picture & Return to Camera',
+              icon: const Icon(Icons.close_rounded),
               onPressed: _clearCustomImage,
             ),
+
+          // Live Camera toggle
+          if (_cameras.isNotEmpty)
+            IconButton(
+              tooltip: _useLiveCamera ? 'Switch to Simulation' : 'Switch to Live Camera',
+              icon: Icon(
+                _useLiveCamera ? Icons.camera_alt : Icons.camera_alt_outlined,
+                color: _useLiveCamera ? Colors.cyanAccent : Colors.white70,
+              ),
+              onPressed: () {
+                setState(() {
+                  _useLiveCamera = !_useLiveCamera;
+                  _customImageBytes = null;
+                  _controller.clearSelection();
+                });
+              },
+            ),
+
+          // Flip camera (front/back)
+          if (_useLiveCamera && _cameras.length > 1)
+            IconButton(
+              tooltip: 'Flip Camera',
+              icon: const Icon(Icons.flip_camera_ios_rounded),
+              onPressed: _switchCamera,
+            ),
+
+          // Flash/Torch toggle
+          if (_useLiveCamera)
+            IconButton(
+              tooltip: _isFlashOn ? 'Turn Flash Off' : 'Turn Flash On',
+              icon: Icon(
+                _isFlashOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                color: _isFlashOn ? Colors.amberAccent : Colors.white70,
+              ),
+              onPressed: _toggleFlash,
+            ),
+
+          // Pick picture from gallery
           IconButton(
-            tooltip: 'Upload / Pick Picture',
-            icon: const Icon(Icons.add_photo_alternate_rounded, color: Colors.cyanAccent),
+            tooltip: 'Pick Picture',
+            icon: const Icon(Icons.add_photo_alternate_outlined),
             onPressed: _pickCustomImage,
           ),
+
+          // Configure API Key
+          IconButton(
+            tooltip: 'Configure Gemini API Key',
+            icon: Icon(
+              Icons.key_rounded,
+              color: _geminiApiKey != null ? Colors.amberAccent : Colors.white70,
+            ),
+            onPressed: _showApiKeyDialog,
+          ),
+
+          // Theme selector
           PopupMenuButton<String>(
             tooltip: 'Choose Visual Theme',
             icon: const Icon(Icons.palette_outlined),
@@ -161,21 +395,91 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
       body: VisionLensOverlay(
         controller: _controller,
         adapter: _adapter,
-        child: _customImageBytes != null
-            ? Container(
-                color: Colors.black,
-                alignment: Alignment.center,
-                child: Image.memory(
-                  _customImageBytes!,
-                  fit: BoxFit.contain,
-                ),
-              )
-            : _buildCameraSimulationView(),
+        child: _buildBody(),
       ),
     );
   }
 
-  Widget _buildCameraSimulationView() {
+  Widget _buildBody() {
+    if (_customImageBytes != null) {
+      return Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: Image.memory(
+          _customImageBytes!,
+          fit: BoxFit.contain,
+        ),
+      );
+    }
+
+    if (_useLiveCamera) {
+      return _buildCameraView();
+    }
+
+    return _buildSimulationView();
+  }
+
+  Widget _buildCameraView() {
+    if (_cameraErrorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.videocam_off_rounded, size: 48, color: Colors.orangeAccent),
+              const SizedBox(height: 12),
+              Text(
+                _cameraErrorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _initCamera,
+                child: const Text('Retry Camera'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_isCameraInitialized || _cameraController == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Colors.cyanAccent),
+            SizedBox(height: 16),
+            Text(
+              'Connecting to Real Camera...',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: _cameraController!.value.previewSize?.height ?? constraints.maxWidth,
+              height: _cameraController!.value.previewSize?.width ?? constraints.maxHeight,
+              child: CameraPreview(_cameraController!),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSimulationView() {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -206,7 +510,7 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
               ),
               const SizedBox(height: 6.0),
               const Text(
-                'Tap, lasso, or box-select any area below, or upload your own picture!',
+                'Tap, lasso, or box-select any area below, or toggle to Live Camera above!',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white60,
@@ -214,24 +518,7 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
                   height: 1.4,
                 ),
               ),
-              const SizedBox(height: 18.0),
-
-              // Upload Button
-              ElevatedButton.icon(
-                onPressed: _pickCustomImage,
-                icon: const Icon(Icons.upload_file_rounded, size: 18.0),
-                label: const Text('Upload Your Own Picture'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.cyanAccent.withAlpha(40),
-                  foregroundColor: Colors.cyanAccent,
-                  side: const BorderSide(color: Colors.cyanAccent),
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-                ),
-              ),
-
-              const SizedBox(height: 24.0),
-
+              const SizedBox(height: 20.0),
               _buildSimulationCard(
                 icon: Icons.watch_rounded,
                 title: 'Smart Watch Display',
@@ -242,12 +529,6 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
                 icon: Icons.functions_rounded,
                 title: 'Math Equation: 3x + 15 = 45',
                 subtitle: 'Draw a lasso around the equation to solve step-by-step',
-              ),
-              const SizedBox(height: 12.0),
-              _buildSimulationCard(
-                icon: Icons.qr_code_scanner_rounded,
-                title: 'Invoice SKU #FL-VISION-2026',
-                subtitle: 'Select with bounding box to extract numbers (OCR)',
               ),
             ],
           ),
