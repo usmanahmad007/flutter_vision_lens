@@ -30,7 +30,9 @@ jobs:
         run: flutter test
 
       - name: Validate pub publish dry-run
-        run: dart pub publish --dry-run
+        run: |
+          git checkout -- .
+          dart pub publish --dry-run
 
       - name: Analyze example project
         run: |
