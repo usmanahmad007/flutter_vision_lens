@@ -69,7 +69,13 @@ class _VisionLensDemoScreenState extends State<VisionLensDemoScreen> {
       ],
     );
 
-    // Default to offline mock adapter so it works without any API keys!
+    // Default to offline MockVisionAdapter so developers can run and test
+    // immediately without needing an API key!
+    //
+    // To connect to real Google Gemini Multimodal AI, replace with your API key:
+    // _adapter = const GeminiVisionAdapter(
+    //   apiKey: 'YOUR_GEMINI_API_KEY', // Get from https://aistudio.google.com/
+    // );
     _adapter = const MockVisionAdapter();
   }
 
