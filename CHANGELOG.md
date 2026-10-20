@@ -1,3 +1,11 @@
+## 0.1.1
+
+* Added real hardware camera stream integration with `CameraPreview` in the example application.
+* Added camera flipping (front / back) and flash torch controls.
+* Added in-app secure Gemini API key dialog in the example app.
+* Added GitHub Actions CI workflow for automated testing and static analysis.
+* Added `CONTRIBUTING.md` open source guide and enhanced README documentation.
+
 ## 0.1.0
 
 * **Initial release of `flutter_vision_lens`** — Interactive Apple Visual Intelligence and Google Lens style multimodal vision overlay for Flutter.
